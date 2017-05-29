@@ -59,5 +59,3 @@ Delete data
 #### `db.exec(string sql, array props, bool notCritical) -> data`
 
 Execute an SQL command
-
-#### `db.serverExec(string type, object args)`
