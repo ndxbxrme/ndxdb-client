@@ -69,7 +69,7 @@ module.provider 'ndxdb', ->
           tableCb()
         else
           async.eachSeries value, (obj, insertCb) ->
-            database.insert key, obj
+            insert key, obj
             insertCb()
           , tableCb
       else

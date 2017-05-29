@@ -102,7 +102,7 @@
             return tableCb();
           } else {
             return async.eachSeries(value, function(obj, insertCb) {
-              database.insert(key, obj);
+              insert(key, obj);
               return insertCb();
             }, tableCb);
           }
