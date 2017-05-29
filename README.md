@@ -5,7 +5,7 @@
 ## Usage  
 `bower install --save ndxdb`  
 ```coffeescript
-angular.module 'myApp', []
+angular.module 'myApp', ['ndx']
 .config (ndxdbProvider) ->
   ndxdbProvider.config
     tables: ['users', 'countries']
