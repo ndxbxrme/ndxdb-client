@@ -1,5 +1,7 @@
 # ndxdb-client
 * clientside database for [ndx-framework](https://github.com/ndxbxrme/ndx-framework) apps  
+* built on top of the mighty [alasql](https://github.com/agershun/alasql)  
+
 ## Usage  
 `bower install --save ndxdb`  
 ```coffeescript
