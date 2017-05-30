@@ -24,7 +24,7 @@ Inject `ndxdbProvider` into a config block and call it's `.config()` function to
 ndxdbProvider.config
   autoId: '_id' # id column [String] defaults to _id
   database: 'db' # dabase name [String] defaults to db
-  tables: [true, 'people'] # list of tables, can be a Boolean, String or and Array of Booleans and Strings
+  tables: [true, 'people'] # list of tables, can be a Boolean, String or an Array of Booleans and Strings
     # if set to true then table names are grabbed from ndx-rest endpoints
   data: [object data, string url, function data] # source/sources of data to prefill the database with
   maxSqlCacheSize: 50 # number of unique statements saved to cache before it gets reset
