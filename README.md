@@ -20,7 +20,7 @@ angular.module 'myApp', ['ndx']
 
 Inject `ndxdbProvider` into a config block and call it's `.config()` function to configure the database.  
 
-```
+```coffeescript
 ndxdbProvider.config
   autoId: '_id' # id column [String] defaults to _id
   database: 'db' # dabase name [String] defaults to db
