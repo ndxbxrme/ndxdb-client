@@ -54,26 +54,26 @@ callbacks can be used to modify data flowing to and from the database.
 
 Unregister a callback
 
-#### `db.select(string table, object whereObj, function callback)`
+#### `ndxdb.select(string table, object whereObj, function callback)`
 
 Select data  
 
-#### `db.insert(string table, object insertObj, function callback)`
+#### `ndxdb.insert(string table, object insertObj, function callback)`
 
 Insert data
 
-#### `db.update(string table, object updateObj, object whereObj, function callback)`
+#### `ndxdb.update(string table, object updateObj, object whereObj, function callback)`
 
 Update data
 
-#### `db.upsert(string table, object upsertObj, object whereObj, function callback)`
+#### `ndxdb.upsert(string table, object upsertObj, object whereObj, function callback)`
 
 Upsert data
 
-#### `db.delete(string table, object whereObj, function callback)`
+#### `ndxdb.delete(string table, object whereObj, function callback)`
 
 Delete data  
 
-#### `db.exec(string sql, array props, bool notCritical) -> data`
+#### `ndxdb.exec(string sql, array props, bool notCritical) -> data`
 
 Execute an SQL command
