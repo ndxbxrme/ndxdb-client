@@ -33,7 +33,8 @@ ndxdbProvider.config
 
 
 ### Methods
-<a name="methods"></a>
+
+Inject `ndxdb` wherever you need access to the database.  
 
 #### `ndxdb.on(string callbackName, function callbackFn) -> db`
 
