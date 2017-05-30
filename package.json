@@ -1,6 +1,6 @@
 {
   "name": "ndxdb-client",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "clientside database for ndx-framework apps",
   "main": "build/index.js",
   "scripts": {
