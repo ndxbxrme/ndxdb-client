@@ -6,7 +6,11 @@ catch e
   module = angular.module 'ndx', []
 module.provider 'ndxdb', ->
   http = null
-  user = {}
+  auth =
+    getUser: ->
+      displayName: 'anonymous'
+      roles:
+        anon: true
   database = null
   settings = 
     database: 'db'
@@ -239,7 +243,7 @@ module.provider 'ndxdb', ->
               id: getId r
               table: table
               obj: delObj
-              user: user
+              user: auth.getUser()
               isServer: isServer
             callback()
       else if isInsert
@@ -252,7 +256,7 @@ module.provider 'ndxdb', ->
               table: table
               obj: prop
               args: args
-              user: user
+              user: auth.getUser()
               isServer: isServer
         else
           if settings.AUTO_DATE
@@ -261,7 +265,7 @@ module.provider 'ndxdb', ->
             id: getId props[0]
             table: table
             obj: props[0]
-            user: user
+            user: auth.getUser()
             args: args
             isServer: isServer
     output = database.exec sql, props, cb   
@@ -277,7 +281,7 @@ module.provider 'ndxdb', ->
             table: updateId.ndxtable
             obj: r
             args: args
-            user: user
+            user: auth.getUser()
             isServer: isServer
         callback()
     if error
@@ -337,7 +341,7 @@ module.provider 'ndxdb', ->
     asyncCallback (if isServer then 'serverPreSelect' else 'preSelect'), 
       table: table
       args: args
-      user: user
+      user: auth.getUser()
     , (result) ->
       if not result
         return cb? [], 0
@@ -355,7 +359,7 @@ module.provider 'ndxdb', ->
           table: table
           objs: output
           isServer: isServer
-          user: user
+          user: auth.getUser()
         , ->
           total = output.length
           if args.page or args.pageSize
@@ -376,7 +380,7 @@ module.provider 'ndxdb', ->
       table: table
       obj: obj
       where: whereObj
-      user: user
+      user: auth.getUser()
     , (result) ->
       if not result
         return cb? []
@@ -396,7 +400,7 @@ module.provider 'ndxdb', ->
     asyncCallback (if isServer then 'serverPreInsert' else 'preInsert'),
       table: table
       obj: obj
-      user: user
+      user: auth.getUser()
     , (result) ->
       if not result
         return cb? []
@@ -420,7 +424,7 @@ module.provider 'ndxdb', ->
     asyncCallback (if isServer then 'serverPreDelete' else 'preDelete'),
       table: table
       where: whereObj
-      user: user
+      user: auth.getUser()
     , (result) ->
       if not result
         cb? []
@@ -428,8 +432,10 @@ module.provider 'ndxdb', ->
     
   config: (args) ->
     Object.assign settings, args
-  $get: ($http) ->
+  $get: ($http, $injector) ->
     http = $http
+    if $injector.has 'auth'
+      auth = $injector.get 'auth'
     start: ->
       if settings.database and settings.tables
         attachDatabase()

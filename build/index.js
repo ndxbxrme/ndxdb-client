@@ -12,9 +12,18 @@
   }
 
   module.provider('ndxdb', function() {
-    var asyncCallback, attachDatabase, callbacks, cleanObj, database, del, doexec, exec, generateId, getId, getIdField, http, inflate, inflateFromHttp, inflateFromObject, inflateFromRest, insert, maintenanceMode, makeTable, makeTablesFromRest, makeWhere, resetSqlCache, select, settings, sqlCache, sqlCacheSize, syncCallback, update, upsert, user;
+    var asyncCallback, attachDatabase, auth, callbacks, cleanObj, database, del, doexec, exec, generateId, getId, getIdField, http, inflate, inflateFromHttp, inflateFromObject, inflateFromRest, insert, maintenanceMode, makeTable, makeTablesFromRest, makeWhere, resetSqlCache, select, settings, sqlCache, sqlCacheSize, syncCallback, update, upsert;
     http = null;
-    user = {};
+    auth = {
+      getUser: function() {
+        return {
+          displayName: 'anonymous',
+          roles: {
+            anon: true
+          }
+        };
+      }
+    };
     database = null;
     settings = {
       database: 'db',
@@ -334,7 +343,7 @@
                 id: getId(r),
                 table: table,
                 obj: delObj,
-                user: user,
+                user: auth.getUser(),
                 isServer: isServer
               });
               return callback();
@@ -353,7 +362,7 @@
                 table: table,
                 obj: prop,
                 args: args,
-                user: user,
+                user: auth.getUser(),
                 isServer: isServer
               });
             }
@@ -365,7 +374,7 @@
               id: getId(props[0]),
               table: table,
               obj: props[0],
-              user: user,
+              user: auth.getUser(),
               args: args,
               isServer: isServer
             });
@@ -387,7 +396,7 @@
               table: updateId.ndxtable,
               obj: r,
               args: args,
-              user: user,
+              user: auth.getUser(),
               isServer: isServer
             });
           }
@@ -460,7 +469,7 @@
       return asyncCallback((isServer ? 'serverPreSelect' : 'preSelect'), {
         table: table,
         args: args,
-        user: user
+        user: auth.getUser()
       }, function(result) {
         var myCb, output, sorting, where;
         if (!result) {
@@ -483,7 +492,7 @@
             table: table,
             objs: output,
             isServer: isServer,
-            user: user
+            user: auth.getUser()
           }, function() {
             var total;
             total = output.length;
@@ -513,7 +522,7 @@
         table: table,
         obj: obj,
         where: whereObj,
-        user: user
+        user: auth.getUser()
       }, function(result) {
         var key, props, updateProps, updateSql, where;
         if (!result) {
@@ -540,7 +549,7 @@
       return asyncCallback((isServer ? 'serverPreInsert' : 'preInsert'), {
         table: table,
         obj: obj,
-        user: user
+        user: auth.getUser()
       }, function(result) {
         if (!result) {
           return typeof cb === "function" ? cb([]) : void 0;
@@ -574,7 +583,7 @@
       return asyncCallback((isServer ? 'serverPreDelete' : 'preDelete'), {
         table: table,
         where: whereObj,
-        user: user
+        user: auth.getUser()
       }, function(result) {
         if (!result) {
           if (typeof cb === "function") {
@@ -588,8 +597,11 @@
       config: function(args) {
         return Object.assign(settings, args);
       },
-      $get: function($http) {
+      $get: function($http, $injector) {
         http = $http;
+        if ($injector.has('auth')) {
+          auth = $injector.get('auth');
+        }
         return {
           start: function() {
             if (settings.database && settings.tables) {
