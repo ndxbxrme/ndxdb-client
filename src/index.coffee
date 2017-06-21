@@ -434,8 +434,8 @@ module.provider 'ndxdb', ->
     Object.assign settings, args
   $get: ($http, $injector) ->
     http = $http
-    if $injector.has 'auth'
-      auth = $injector.get 'auth'
+    if $injector.has 'Auth'
+      auth = $injector.get 'Auth'
     start: ->
       if settings.database and settings.tables
         attachDatabase()

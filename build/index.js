@@ -599,8 +599,8 @@
       },
       $get: function($http, $injector) {
         http = $http;
-        if ($injector.has('auth')) {
-          auth = $injector.get('auth');
+        if ($injector.has('Auth')) {
+          auth = $injector.get('Auth');
         }
         return {
           start: function() {
