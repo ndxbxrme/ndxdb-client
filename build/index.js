@@ -354,18 +354,21 @@
           sql: ''
         };
       }
-      sql = '';
       props = [];
       parent = '';
       parse = function(obj, op, comp) {
-        var key, writeVal;
+        var andsql, j, k, key, len, len1, objsql, orsql, ref, ref1, sql, thing, writeVal;
         sql = '';
         writeVal = function(key, comp) {
           var fullKey;
           fullKey = (parent + "`" + key + "`").replace(/\./g, '->');
           fullKey = fullKey.replace(/->`\$[a-z]+`$/, '');
           if (obj[key] === null) {
-            return sql += " " + op + " " + fullKey + " IS NULL";
+            if (key === '$ne' || key === '$neq') {
+              return sql += " " + op + " " + fullKey + " IS NOT NULL";
+            } else {
+              return sql += " " + op + " " + fullKey + " IS NULL";
+            }
           } else {
             sql += " " + op + " " + fullKey + " " + comp + " ?";
             return props.push(obj[key]);
@@ -373,7 +376,26 @@
         };
         for (key in obj) {
           if (key === '$or') {
-            sql += (" " + op + " (" + (parse(obj[key], 'OR', comp)) + ")").replace(/\( OR /g, '(');
+            orsql = '';
+            ref = obj[key];
+            for (j = 0, len = ref.length; j < len; j++) {
+              thing = ref[j];
+              console.log(thing);
+              objsql = parse(thing, 'AND', comp).replace(/^ AND /, '');
+              if (/ AND | OR /.test(objsql) && objsql.indexOf('(') !== 0) {
+                objsql = "(" + objsql + ")";
+              }
+              orsql += ' OR ' + objsql;
+            }
+            sql += (" " + op + " (" + orsql + ")").replace(/\( OR /g, '(');
+          } else if (key === '$and') {
+            andsql = '';
+            ref1 = obj[key];
+            for (k = 0, len1 = ref1.length; k < len1; k++) {
+              thing = ref1[k];
+              andsql += parse(thing, 'AND', comp);
+            }
+            sql += (" " + op + " (" + andsql + ")").replace(/\( AND /g, '(');
           } else if (key === '$gt') {
             writeVal(key, '>');
           } else if (key === '$lt') {
@@ -386,6 +408,12 @@
             writeVal(key, '=');
           } else if (key === '$neq') {
             writeVal(key, '!=');
+          } else if (key === '$ne') {
+            writeVal(key, '!=');
+          } else if (key === '$in') {
+            writeVal(key, 'IN');
+          } else if (key === '$nin') {
+            writeVal(key, 'NOT IN');
           } else if (key === '$like') {
             sql += " " + op + " " + (parent.replace(/->$/, '')) + " LIKE '%" + obj[key] + "%'";
             parent = '';
@@ -406,6 +434,7 @@
           }
         }
         parent = '';
+        console.log(sql);
         return sql;
       };
       delete whereObj['#'];

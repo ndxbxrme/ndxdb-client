@@ -240,7 +240,6 @@ module.provider 'ndxdb', ->
   makeWhere = (whereObj) ->
     if not whereObj or whereObj.sort or whereObj.sortDir or whereObj.pageSize
       return sql: ''
-    sql = ''
     props = []
     parent = ''
 
@@ -250,13 +249,28 @@ module.provider 'ndxdb', ->
         fullKey = "#{parent}`#{key}`".replace /\./g, '->'
         fullKey = fullKey.replace /->`\$[a-z]+`$/, ''
         if obj[key] is null
-          sql += " #{op} #{fullKey} IS NULL"
+          if key is '$ne' or key is '$neq'
+            sql += " #{op} #{fullKey} IS NOT NULL"
+          else
+            sql += " #{op} #{fullKey} IS NULL"
         else
           sql += " #{op} #{fullKey} #{comp} ?"
           props.push obj[key]
       for key of obj
         if key is '$or'
-          sql += " #{op} (#{parse(obj[key], 'OR', comp)})".replace /\( OR /g, '('
+          orsql = ''
+          for thing in obj[key]
+            console.log thing
+            objsql = parse(thing, 'AND', comp).replace /^ AND /, ''
+            if / AND | OR /.test(objsql) and objsql.indexOf('(') isnt 0
+              objsql = "(#{objsql})"
+            orsql += ' OR ' + objsql
+          sql += " #{op} (#{orsql})".replace /\( OR /g, '('
+        else if key is '$and'
+          andsql = ''
+          for thing in obj[key]
+            andsql += parse(thing, 'AND', comp)
+          sql += " #{op} (#{andsql})".replace /\( AND /g, '('
         else if key is '$gt'
           writeVal key, '>'
         else if key is '$lt'
@@ -269,6 +283,12 @@ module.provider 'ndxdb', ->
           writeVal key, '='
         else if key is '$neq'
           writeVal key, '!='
+        else if key is '$ne'
+          writeVal key, '!='
+        else if key is '$in'
+           writeVal key, 'IN'
+        else if key is '$nin'
+           writeVal key, 'NOT IN'
         else if key is '$like'
           sql += " #{op} #{parent.replace(/->$/, '')} LIKE '%#{obj[key]}%'"
           parent = ''
@@ -287,6 +307,7 @@ module.provider 'ndxdb', ->
         else
           writeVal key, comp
       parent = ''
+      console.log sql
       sql
     delete whereObj['#']
     sql = parse(whereObj, 'AND', '=').replace(/(^|\() (AND|OR) /g, '$1')
