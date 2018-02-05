@@ -80,7 +80,6 @@ module.provider 'ndxdb', ->
     alasql "ATTACH localStorage DATABASE #{settings.database} AS #{settings.database}"
     alasql "USE #{settings.database}"
     database = alasql.databases["#{settings.database}"]
-    console.log database
     firstTime = true
     ###
     for t of database.tables
@@ -228,12 +227,10 @@ module.provider 'ndxdb', ->
       output.error = error
     output
   maxModified = (table, cb) ->
-    console.log 'maxmod', table
     database.exec 'SELECT MAX(modifiedAt) as maxModified FROM ' + table, null, (result) ->
       maxModified = 0
       if result and result.length
         maxModified = result[0].maxModified or 0
-      console.log maxModified
       cb? maxModified
   getDocsToUpload = (table, cb) ->
     database.exec "SELECT * FROM #{table} WHERE modifiedAt=0", null, (result) ->
@@ -343,7 +340,6 @@ module.provider 'ndxdb', ->
         delete obj[key]
     return
   update = (table, obj, whereObj, cb, isServer) ->
-    console.log 'update'
     cleanObj obj
     obj.modifiedAt = obj.modifiedAt or 0
     where = makeWhere whereObj
@@ -379,7 +375,6 @@ module.provider 'ndxdb', ->
           cb? []
     )(auth.getUser())
   insert = (table, obj, cb, isServer) ->
-    console.log 'insert'
     cleanObj obj
     obj.modifiedAt = obj.modifiedAt or 0
     ((user) ->

@@ -121,7 +121,6 @@
       alasql("ATTACH localStorage DATABASE " + settings.database + " AS " + settings.database);
       alasql("USE " + settings.database);
       database = alasql.databases["" + settings.database];
-      console.log(database);
       firstTime = true;
 
       /*
@@ -332,13 +331,11 @@
       return output;
     };
     maxModified = function(table, cb) {
-      console.log('maxmod', table);
       return database.exec('SELECT MAX(modifiedAt) as maxModified FROM ' + table, null, function(result) {
         maxModified = 0;
         if (result && result.length) {
           maxModified = result[0].maxModified || 0;
         }
-        console.log(maxModified);
         return typeof cb === "function" ? cb(maxModified) : void 0;
       });
     };
@@ -480,7 +477,6 @@
     };
     update = function(table, obj, whereObj, cb, isServer) {
       var where;
-      console.log('update');
       cleanObj(obj);
       obj.modifiedAt = obj.modifiedAt || 0;
       where = makeWhere(whereObj);
@@ -527,7 +523,6 @@
       })(auth.getUser());
     };
     insert = function(table, obj, cb, isServer) {
-      console.log('insert');
       cleanObj(obj);
       obj.modifiedAt = obj.modifiedAt || 0;
       return (function(user) {
