@@ -12,8 +12,7 @@
   }
 
   module.provider('ndxdb', function() {
-    var asyncCallback, attachDatabase, auth, callbacks, cleanObj, database, del, doexec, exec, generateId, getId, getIdField, http, inflate, inflateFromHttp, inflateFromObject, inflateFromRest, insert, maintenanceMode, makeTable, makeTablesFromRest, makeWhere, resetSqlCache, select, settings, sqlCache, sqlCacheSize, syncCallback, update, upsert;
-    http = null;
+    var asyncCallback, attachDatabase, auth, callbacks, cleanObj, database, del, doexec, exec, generateId, getDocsToUpload, getId, getIdField, insert, maintenanceMode, makeTable, makeWhere, maxModified, readDiffs, resetSqlCache, select, settings, sqlCache, sqlCacheSize, syncCallback, update, upsert;
     auth = {
       getUser: function() {
         return {
@@ -45,7 +44,9 @@
       preInsert: [],
       preUpdate: [],
       preSelect: [],
-      preDelete: []
+      preDelete: [],
+      selectTransform: [],
+      restore: []
     };
     generateId = function(num) {
       var chars, i, output;
@@ -101,97 +102,6 @@
         return typeof cb === "function" ? cb(true) : void 0;
       }
     };
-    inflateFromObject = function(data, cb) {
-      return async.eachOfSeries(data, function(value, key, tableCb) {
-        if (value.length) {
-          if (value[0][settings.autoId]) {
-            if (database.tables[key]) {
-              database.tables[key].data = value;
-            }
-            return tableCb();
-          } else {
-            return async.eachSeries(value, function(obj, insertCb) {
-              insert(key, obj);
-              return insertCb();
-            }, tableCb);
-          }
-        } else {
-          return tableCb();
-        }
-      }, cb);
-    };
-    inflateFromRest = function(cb) {
-      return http.get('/rest/endpoints').then(function(response) {
-        if (response.data && response.data.endpoints && response.data.endpoints.length) {
-          return async.eachSeries(response.data.endpoints, function(endpoint, callback) {
-            return http.post("/api/" + endpoint).then(function(epResponse) {
-              if (epResponse.data && epResponse.data.items && database.tables[endpoint]) {
-                database.tables[endpoint].data = epResponse.data.items;
-              }
-              return callback();
-            }, callback);
-          }, cb());
-        } else {
-          return cb();
-        }
-      }, cb);
-    };
-    inflateFromHttp = function(url, cb) {
-      return http.get(url).then(function(response) {
-        if (response.data) {
-          return inflateFromObject(response.data, cb);
-        } else {
-          return cb();
-        }
-      }, function() {
-        return cb();
-      });
-    };
-    inflate = function(data, cb) {
-      var type;
-      type = Object.prototype.toString.call(data);
-      switch (type) {
-        case '[object Array]':
-          return async.eachSeries(data, function(item, callback) {
-            return inflate(item, callback);
-          }, cb);
-        case '[object Object]':
-          return inflateFromObject(data, cb);
-        case '[object Function]':
-          return data(this, cb);
-        case '[object Boolean]':
-          if (data) {
-            return inflateFromRest(cb);
-          } else {
-            return cb();
-          }
-          break;
-        case '[object String]':
-          if (data.toLowerCase() === 'rest') {
-            return inflateFromRest(cb);
-          } else {
-            return inflateFromHttp(data, cb);
-          }
-      }
-    };
-    makeTablesFromRest = function(cb) {
-      return http.get('/rest/endpoints').then(function(response) {
-        var endpoint, j, len, ref;
-        if (response.data && response.data.endpoints && response.data.endpoints.length) {
-          ref = response.data.endpoints;
-          for (j = 0, len = ref.length; j < len; j++) {
-            endpoint = ref[j];
-            alasql("CREATE TABLE IF NOT EXISTS " + endpoint);
-          }
-        }
-        if (response.data.autoId) {
-          settings.autoId = response.data.autoId;
-        }
-        return cb();
-      }, function() {
-        return cb();
-      });
-    };
     makeTable = function(table, cb) {
       var type;
       type = Object.prototype.toString.call(table);
@@ -200,46 +110,59 @@
           return async.eachSeries(table, function(item, callback) {
             return makeTable(item, callback);
           }, cb);
-        case '[object Boolean]':
-          if (table) {
-            return makeTablesFromRest(cb);
-          } else {
-            return cb();
-          }
-          break;
         case '[object String]':
-          if (table.toLowerCase() === 'restTables') {
-            return makeTablesFromRest(cb);
-          } else {
-            alasql("CREATE TABLE IF NOT EXISTS " + table);
-            return cb();
-          }
+          alasql("CREATE TABLE IF NOT EXISTS " + table);
+          return typeof cb === "function" ? cb() : void 0;
       }
     };
     attachDatabase = function() {
-      var firstTime, t;
+      var firstTime;
       alasql("CREATE localStorage DATABASE IF NOT EXISTS " + settings.database);
-      alasql("ATTACH localStorage DATABASE " + settings.database + " AS My" + settings.database);
-      alasql("USE My" + settings.database);
-      database = alasql.databases["My" + settings.database];
+      alasql("ATTACH localStorage DATABASE " + settings.database + " AS " + settings.database);
+      alasql("USE " + settings.database);
+      database = alasql.databases["" + settings.database];
+      console.log(database);
       firstTime = true;
-      for (t in database.tables) {
-        firstTime = false;
-      }
+
+      /*
+      for t of database.tables
+        firstTime = false
+        alasql "DELETE FROM #{t}"
+       */
       if (settings.maxSqlCacheSize) {
         alasql.MAXSQLCACHESIZE = settings.maxSqlCacheSize;
       }
-      return makeTable(settings.tables, function() {
-        if (firstTime && settings.data) {
-          return inflate(settings.data, function() {
-            maintenanceMode = false;
-            return syncCallback('ready');
-          });
-        } else {
-          maintenanceMode = false;
-          return syncCallback('ready');
+      maintenanceMode = false;
+      return syncCallback('ready');
+    };
+    readDiffs = function(from, to, out) {
+      var dif, diffs, good, j, len, myout, mypath;
+      diffs = DeepDiff.diff(from, to);
+      out = out || {};
+      if (diffs) {
+        for (j = 0, len = diffs.length; j < len; j++) {
+          dif = diffs[j];
+          switch (dif.kind) {
+            case 'E':
+            case 'N':
+              myout = out;
+              mypath = dif.path.join('.');
+              good = true;
+              if (dif.lhs && dif.rhs && typeof dif.lhs !== typeof dif.rhs) {
+                if (dif.lhs.toString() === dif.rhs.toString()) {
+                  good = false;
+                }
+              }
+              if (good) {
+                myout[mypath] = {};
+                myout = myout[mypath];
+                myout.from = dif.lhs;
+                myout.to = dif.rhs;
+              }
+          }
         }
-      });
+      }
+      return out;
     };
     exec = function(sql, props, notCritical, isServer, cb) {
       if (!maintenanceMode) {
@@ -408,6 +331,25 @@
       }
       return output;
     };
+    maxModified = function(table, cb) {
+      console.log('maxmod', table);
+      return database.exec('SELECT MAX(modifiedAt) as maxModified FROM ' + table, null, function(result) {
+        maxModified = 0;
+        if (result && result.length) {
+          maxModified = result[0].maxModified || 0;
+        }
+        console.log(maxModified);
+        return typeof cb === "function" ? cb(maxModified) : void 0;
+      });
+    };
+    getDocsToUpload = function(table, cb) {
+      return database.exec("SELECT * FROM " + table + " WHERE modifiedAt=0", null, function(result) {
+        if (result && result.length) {
+          return typeof cb === "function" ? cb(result) : void 0;
+        }
+        return typeof cb === "function" ? cb(null) : void 0;
+      });
+    };
     makeWhere = function(whereObj) {
       var parent, parse, props, sql;
       if (!whereObj || whereObj.sort || whereObj.sortDir || whereObj.pageSize) {
@@ -419,23 +361,34 @@
       props = [];
       parent = '';
       parse = function(obj, op, comp) {
-        var key;
+        var key, writeVal;
         sql = '';
+        writeVal = function(key, comp) {
+          var fullKey;
+          fullKey = (parent + "`" + key + "`").replace(/\./g, '->');
+          fullKey = fullKey.replace(/->`\$[a-z]+`$/, '');
+          if (obj[key] === null) {
+            return sql += " " + op + " " + fullKey + " IS NULL";
+          } else {
+            sql += " " + op + " " + fullKey + " " + comp + " ?";
+            return props.push(obj[key]);
+          }
+        };
         for (key in obj) {
           if (key === '$or') {
             sql += (" " + op + " (" + (parse(obj[key], 'OR', comp)) + ")").replace(/\( OR /g, '(');
           } else if (key === '$gt') {
-            sql += parse(obj[key], op, '>');
+            writeVal(key, '>');
           } else if (key === '$lt') {
-            sql += parse(obj[key], op, '<');
+            writeVal(key, '<');
           } else if (key === '$gte') {
-            sql += parse(obj[key], op, '>=');
+            writeVal(key, '>=');
           } else if (key === '$lte') {
-            sql += parse(obj[key], op, '<=');
+            writeVal(key, '<=');
           } else if (key === '$eq') {
-            sql += parse(obj[key], op, '=');
+            writeVal(key, '=');
           } else if (key === '$neq') {
-            sql += parse(obj[key], op, '!=');
+            writeVal(key, '!=');
           } else if (key === '$like') {
             sql += " " + op + " " + (parent.replace(/->$/, '')) + " LIKE '%" + obj[key] + "%'";
             parent = '';
@@ -449,16 +402,16 @@
             sql += " " + op + " " + (parent.replace(/->$/, '')) + " IS NOT NULL";
             parent = '';
           } else if (Object.prototype.toString.call(obj[key]) === '[object Object]') {
-            parent += key + '->';
+            parent += '`' + key + '`->';
             sql += parse(obj[key], op, comp);
           } else {
-            sql += " " + op + " " + parent + key + " " + comp + " ?";
-            props.push(obj[key]);
-            parent = '';
+            writeVal(key, comp);
           }
         }
+        parent = '';
         return sql;
       };
+      delete whereObj['#'];
       sql = parse(whereObj, 'AND', '=').replace(/(^|\() (AND|OR) /g, '$1');
       return {
         sql: sql,
@@ -466,104 +419,142 @@
       };
     };
     select = function(table, args, cb, isServer) {
-      return asyncCallback((isServer ? 'serverPreSelect' : 'preSelect'), {
-        table: table,
-        args: args,
-        user: auth.getUser()
-      }, function(result) {
-        var myCb, output, sorting, where;
-        if (!result) {
-          return typeof cb === "function" ? cb([], 0) : void 0;
-        }
-        args = args || {};
-        where = makeWhere(args.where ? args.where : args);
-        sorting = '';
-        if (args.sort) {
-          sorting += " ORDER BY " + args.sort;
-          if (args.sortDir) {
-            sorting += " " + args.sortDir;
+      return (function(user) {
+        return asyncCallback((isServer ? 'serverPreSelect' : 'preSelect'), {
+          table: table,
+          args: args,
+          user: user
+        }, function(result) {
+          var myCb, output, sorting, where;
+          if (!result) {
+            return typeof cb === "function" ? cb([], 0) : void 0;
           }
-        }
-        if (where.sql) {
-          where.sql = " WHERE " + where.sql;
-        }
-        myCb = function(output) {
-          return asyncCallback((isServer ? 'serverSelect' : 'select'), {
-            table: table,
-            objs: output,
-            isServer: isServer,
-            user: auth.getUser()
-          }, function() {
-            var total;
-            total = output.length;
-            if (args.page || args.pageSize) {
-              args.page = args.page || 1;
-              args.pageSize = args.pageSize || 10;
-              output = output.splice((args.page - 1) * args.pageSize, args.pageSize);
+          args = args || {};
+          where = makeWhere(args.where ? args.where : args);
+          sorting = '';
+          if (args.sort) {
+            args.sort = args.sort.replace(/\./g, '->');
+            sorting += " ORDER BY " + args.sort;
+            if (args.sortDir) {
+              sorting += " " + args.sortDir;
             }
-            return typeof cb === "function" ? cb(output, total) : void 0;
-          });
-        };
-        return output = exec("SELECT * FROM " + table + where.sql + sorting, where.props, null, isServer, myCb);
-      });
+          }
+          if (where.sql) {
+            where.sql = " WHERE " + where.sql;
+          }
+          myCb = function(output) {
+            return asyncCallback((isServer ? 'serverSelect' : 'select'), {
+              table: table,
+              objs: output,
+              isServer: isServer,
+              user: user
+            }, function() {
+              var total;
+              total = output.length;
+              if (args.page || args.pageSize) {
+                args.page = args.page || 1;
+                args.pageSize = args.pageSize || 10;
+                output = output.splice((args.page - 1) * args.pageSize, args.pageSize);
+              }
+              return asyncCallback((isServer ? 'serverSelectTransform' : 'selectTransform'), {
+                table: table,
+                objs: output,
+                isServer: isServer,
+                user: user
+              }, function() {
+                return typeof cb === "function" ? cb(output, total) : void 0;
+              });
+            });
+          };
+          return output = exec("SELECT * FROM " + table + where.sql + sorting, where.props, null, isServer, myCb);
+        });
+      })(auth.getUser());
     };
     cleanObj = function(obj) {
       var key;
       for (key in obj) {
-        if (key.indexOf('$') === 0) {
+        if (key.indexOf('$') === 0 || key === '#') {
           delete obj[key];
         }
       }
     };
     update = function(table, obj, whereObj, cb, isServer) {
+      var where;
+      console.log('update');
       cleanObj(obj);
-      return asyncCallback((isServer ? 'serverPreUpdate' : 'preUpdate'), {
-        id: getId(obj),
-        table: table,
-        obj: obj,
-        where: whereObj,
-        user: auth.getUser()
-      }, function(result) {
-        var key, props, updateProps, updateSql, where;
-        if (!result) {
-          return typeof cb === "function" ? cb([]) : void 0;
-        }
-        updateSql = [];
-        updateProps = [];
-        where = makeWhere(whereObj);
-        if (where.sql) {
-          where.sql = " WHERE " + where.sql;
-        }
-        for (key in obj) {
-          if (where.props.indexOf(obj[key]) === -1) {
-            updateSql.push(" `" + key + "`=? ");
-            updateProps.push(obj[key]);
+      obj.modifiedAt = obj.modifiedAt || 0;
+      where = makeWhere(whereObj);
+      if (where.sql) {
+        where.sql = " WHERE " + where.sql;
+      }
+      return (function(user) {
+        return exec("SELECT * FROM " + table + where.sql, where.props, null, true, function(oldItems) {
+          if (oldItems) {
+            return async.each(oldItems, function(oldItem, diffCb) {
+              var diffs, id;
+              diffs = readDiffs(oldItem, obj);
+              id = getId(oldItem);
+              return asyncCallback((isServer ? 'serverPreUpdate' : 'preUpdate'), {
+                id: id,
+                table: table,
+                obj: obj,
+                where: whereObj,
+                changes: diffs,
+                user: user
+              }, function(result) {
+                var key, updateProps, updateSql;
+                if (!result) {
+                  return typeof cb === "function" ? cb([]) : void 0;
+                }
+                updateSql = [];
+                updateProps = [];
+                for (key in obj) {
+                  if (where.props.indexOf(obj[key]) === -1) {
+                    updateSql.push(" `" + key + "`=? ");
+                    updateProps.push(obj[key]);
+                  }
+                }
+                updateProps.push(id);
+                return exec("UPDATE " + table + " SET " + (updateSql.join(',')) + " WHERE `" + [settings.autoId] + "`= ?", updateProps, null, isServer, diffCb, diffs);
+              });
+            }, function() {
+              return typeof cb === "function" ? cb([]) : void 0;
+            });
+          } else {
+            return typeof cb === "function" ? cb([]) : void 0;
           }
-        }
-        props = updateProps.concat(where.props);
-        return exec("UPDATE " + table + " SET " + (updateSql.join(',')) + where.sql, props, null, isServer, cb);
-      });
+        });
+      })(auth.getUser());
     };
     insert = function(table, obj, cb, isServer) {
+      console.log('insert');
       cleanObj(obj);
-      return asyncCallback((isServer ? 'serverPreInsert' : 'preInsert'), {
-        table: table,
-        obj: obj,
-        user: auth.getUser()
-      }, function(result) {
-        if (!result) {
-          return typeof cb === "function" ? cb([]) : void 0;
-        }
-        if (Object.prototype.toString.call(obj) === '[object Array]') {
-          return exec("INSERT INTO " + table + " SELECT * FROM ?", [obj], null, isServer, cb);
-        } else {
-          return exec("INSERT INTO " + table + " VALUES ?", [obj], null, isServer, cb);
-        }
-      });
+      obj.modifiedAt = obj.modifiedAt || 0;
+      return (function(user) {
+        return asyncCallback((isServer ? 'serverPreInsert' : 'preInsert'), {
+          table: table,
+          obj: obj,
+          user: user
+        }, function(result) {
+          if (!result) {
+            return typeof cb === "function" ? cb([]) : void 0;
+          }
+          if (Object.prototype.toString.call(obj) === '[object Array]') {
+            return exec("INSERT INTO " + table + " SELECT * FROM ?", [obj], null, isServer, cb);
+          } else {
+            return exec("INSERT INTO " + table + " VALUES ?", [obj], null, isServer, cb);
+          }
+        });
+      })(auth.getUser());
     };
     upsert = function(table, obj, whereObj, cb, isServer) {
       var test, where;
       where = makeWhere(whereObj);
+      if (!whereObj && obj[settings.autoId]) {
+        whereObj = {};
+        whereObj[settings.autoId] = obj[settings.autoId];
+        where = makeWhere(whereObj);
+      }
       if (where.sql) {
         where.sql = " WHERE " + where.sql;
       }
@@ -580,31 +571,33 @@
       if (where.sql) {
         where.sql = " WHERE " + where.sql;
       }
-      return asyncCallback((isServer ? 'serverPreDelete' : 'preDelete'), {
-        table: table,
-        where: whereObj,
-        user: auth.getUser()
-      }, function(result) {
-        if (!result) {
-          if (typeof cb === "function") {
-            cb([]);
+      return (function(user) {
+        return asyncCallback((isServer ? 'serverPreDelete' : 'preDelete'), {
+          table: table,
+          where: whereObj,
+          user: user
+        }, function(result) {
+          if (!result) {
+            if (typeof cb === "function") {
+              cb([]);
+            }
           }
-        }
-        return exec("DELETE FROM " + table + where.sql, where.props, null, isServer, cb);
-      });
+          return exec("DELETE FROM " + table + where.sql, where.props, null, isServer, cb);
+        });
+      })(auth.getUser());
     };
     return {
       config: function(args) {
         return Object.assign(settings, args);
       },
-      $get: function($http, $injector) {
-        http = $http;
+      $get: function($injector, $rootElement) {
+        settings.database = $rootElement.attr('ng-app');
         if ($injector.has('Auth')) {
           auth = $injector.get('Auth');
         }
         return {
           start: function() {
-            if (settings.database && settings.tables) {
+            if (settings.database) {
               return attachDatabase();
             }
           },
@@ -614,6 +607,9 @@
           insert: insert,
           upsert: upsert,
           "delete": del,
+          makeTable: makeTable,
+          maxModified: maxModified,
+          getDocsToUpload: getDocsToUpload,
           on: function(name, callback) {
             callbacks[name].push(callback);
             return this;

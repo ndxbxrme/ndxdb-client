@@ -5,7 +5,6 @@ try
 catch e
   module = angular.module 'ndx', []
 module.provider 'ndxdb', ->
-  http = null
   auth =
     getUser: ->
       displayName: 'anonymous'
@@ -31,6 +30,8 @@ module.provider 'ndxdb', ->
     preUpdate: []
     preSelect: []
     preDelete: []
+    selectTransform: []
+    restore: []
   generateId = (num) ->
     output = ''
     chars = 'abcdefghijklmnopqrstuvwxyz1234567890'
@@ -63,78 +64,6 @@ module.provider 'ndxdb', ->
         cb? truth
     else
       cb? true
-  inflateFromObject = (data, cb) ->
-    async.eachOfSeries data, (value, key, tableCb) ->
-      if value.length
-        if value[0][settings.autoId]
-          #already id'd copy them in
-          if database.tables[key]
-            database.tables[key].data = value
-          tableCb()
-        else
-          async.eachSeries value, (obj, insertCb) ->
-            insert key, obj
-            insertCb()
-          , tableCb
-      else
-        tableCb()
-    , cb
-  inflateFromRest = (cb) ->
-    http.get '/rest/endpoints'
-    .then (response) ->
-      if response.data and response.data.endpoints and response.data.endpoints.length
-        async.eachSeries response.data.endpoints, (endpoint, callback) ->
-          http.post "/api/#{endpoint}"
-          .then (epResponse) ->
-            if epResponse.data and epResponse.data.items and database.tables[endpoint]
-              database.tables[endpoint].data = epResponse.data.items
-            callback()
-          , callback
-        , cb()
-      else
-        cb()
-    , cb
-  inflateFromHttp = (url, cb) ->
-    http.get url
-    .then (response) ->
-      if response.data
-        inflateFromObject response.data, cb
-      else
-        cb()
-    , ->
-      cb()
-  inflate = (data, cb) ->
-    type = Object.prototype.toString.call data
-    switch type
-      when '[object Array]'
-        async.eachSeries data, (item, callback) ->
-          inflate item, callback
-        , cb
-      when '[object Object]'
-        inflateFromObject data, cb
-      when '[object Function]'
-        data @, cb
-      when '[object Boolean]'
-        if data
-          inflateFromRest cb
-        else
-          cb()
-      when '[object String]'
-        if data.toLowerCase() is 'rest'
-          inflateFromRest cb
-        else
-          inflateFromHttp data, cb
-  makeTablesFromRest = (cb) ->
-    http.get '/rest/endpoints'
-    .then (response) ->
-      if response.data and response.data.endpoints and response.data.endpoints.length
-        for endpoint in response.data.endpoints
-          alasql "CREATE TABLE IF NOT EXISTS #{endpoint}"
-      if response.data.autoId
-        settings.autoId = response.data.autoId
-      cb()
-    , ->
-      cb()
   makeTable = (table, cb) ->
     type = Object.prototype.toString.call table
     switch type
@@ -142,35 +71,46 @@ module.provider 'ndxdb', ->
         async.eachSeries table, (item, callback) ->
           makeTable item, callback
         , cb
-      when '[object Boolean]'
-        if table
-          makeTablesFromRest cb
-        else
-          cb()
       when '[object String]'
-        if table.toLowerCase() is 'restTables'
-          makeTablesFromRest cb
-        else
-          alasql "CREATE TABLE IF NOT EXISTS #{table}"
-          cb()
+        alasql "CREATE TABLE IF NOT EXISTS #{table}"
+        cb?()
   attachDatabase = ->
     alasql "CREATE localStorage DATABASE IF NOT EXISTS #{settings.database}"
-    alasql "ATTACH localStorage DATABASE #{settings.database} AS My#{settings.database}"
-    alasql "USE My#{settings.database}"
-    database = alasql.databases["My#{settings.database}"]
+    #alasql "DROP localStorage DATABASE #{settings.database}; CREATE localStorage DATABASE #{settings.database}"
+    alasql "ATTACH localStorage DATABASE #{settings.database} AS #{settings.database}"
+    alasql "USE #{settings.database}"
+    database = alasql.databases["#{settings.database}"]
+    console.log database
     firstTime = true
+    ###
     for t of database.tables
       firstTime = false
+      alasql "DELETE FROM #{t}"
+    ###
     if settings.maxSqlCacheSize
       alasql.MAXSQLCACHESIZE = settings.maxSqlCacheSize
-    makeTable settings.tables, ->
-      if firstTime and settings.data
-        inflate settings.data, ->
-          maintenanceMode = false
-          syncCallback 'ready'
-      else
-        maintenanceMode = false
-        syncCallback 'ready'
+    maintenanceMode = false
+    syncCallback 'ready'
+
+  readDiffs = (from, to, out) ->
+    diffs = DeepDiff.diff from, to
+    out = out or {}
+    if diffs
+      for dif in diffs
+        switch dif.kind
+          when 'E', 'N'
+            myout = out
+            mypath = dif.path.join('.')
+            good = true
+            if dif.lhs and dif.rhs and typeof(dif.lhs) isnt typeof(dif.rhs)
+              if dif.lhs.toString() is dif.rhs.toString()
+                good = false
+            if good
+              myout[mypath] ={}
+              myout = myout[mypath]
+              myout.from = dif.lhs
+              myout.to = dif.rhs
+    out
   exec = (sql, props, notCritical, isServer, cb) ->
     if not maintenanceMode
       return doexec sql, props, notCritical, isServer, cb
@@ -287,6 +227,19 @@ module.provider 'ndxdb', ->
     if error
       output.error = error
     output
+  maxModified = (table, cb) ->
+    console.log 'maxmod', table
+    database.exec 'SELECT MAX(modifiedAt) as maxModified FROM ' + table, null, (result) ->
+      maxModified = 0
+      if result and result.length
+        maxModified = result[0].maxModified or 0
+      console.log maxModified
+      cb? maxModified
+  getDocsToUpload = (table, cb) ->
+    database.exec "SELECT * FROM #{table} WHERE modifiedAt=0", null, (result) ->
+      if result and result.length
+        return cb? result
+      cb? null
   makeWhere = (whereObj) ->
     if not whereObj or whereObj.sort or whereObj.sortDir or whereObj.pageSize
       return sql: ''
@@ -296,21 +249,29 @@ module.provider 'ndxdb', ->
 
     parse = (obj, op, comp) ->
       sql = ''
+      writeVal = (key, comp) ->
+        fullKey = "#{parent}`#{key}`".replace /\./g, '->'
+        fullKey = fullKey.replace /->`\$[a-z]+`$/, ''
+        if obj[key] is null
+          sql += " #{op} #{fullKey} IS NULL"
+        else
+          sql += " #{op} #{fullKey} #{comp} ?"
+          props.push obj[key]
       for key of obj
         if key is '$or'
           sql += " #{op} (#{parse(obj[key], 'OR', comp)})".replace /\( OR /g, '('
         else if key is '$gt'
-          sql += parse obj[key], op, '>'
+          writeVal key, '>'
         else if key is '$lt'
-          sql += parse obj[key], op, '<'
+          writeVal key, '<'
         else if key is '$gte'
-          sql += parse obj[key], op, '>='
+          writeVal key, '>='
         else if key is '$lte'
-          sql += parse obj[key], op, '<='
+          writeVal key, '<='
         else if key is '$eq'
-          sql += parse obj[key], op, '='
+          writeVal key, '='
         else if key is '$neq'
-          sql += parse obj[key], op, '!='
+          writeVal key, '!='
         else if key is '$like'
           sql += " #{op} #{parent.replace(/->$/, '')} LIKE '%#{obj[key]}%'"
           parent = ''
@@ -324,92 +285,122 @@ module.provider 'ndxdb', ->
           sql += " #{op} #{parent.replace(/->$/, '')} IS NOT NULL"
           parent = ''
         else if Object::toString.call(obj[key]) is '[object Object]'
-          parent += key + '->'
+          parent += '`' + key + '`->'
           sql += parse(obj[key], op, comp)
         else
-          sql += " #{op} #{parent}#{key} #{comp} ?"
-          props.push obj[key]
-          parent = ''
+          writeVal key, comp
+      parent = ''
       sql
-
+    delete whereObj['#']
     sql = parse(whereObj, 'AND', '=').replace(/(^|\() (AND|OR) /g, '$1')
     {
       sql: sql
       props: props
     }
   select = (table, args, cb, isServer) ->
-    asyncCallback (if isServer then 'serverPreSelect' else 'preSelect'), 
-      table: table
-      args: args
-      user: auth.getUser()
-    , (result) ->
-      if not result
-        return cb? [], 0
-      args = args or {}
-      where = makeWhere if args.where then args.where else args
-      sorting = ''
-      if args.sort
-        sorting += " ORDER BY #{args.sort}"
-        if args.sortDir
-          sorting += " #{args.sortDir}"
-      if where.sql
-        where.sql = " WHERE #{where.sql}"
-      myCb = (output) ->
-        asyncCallback (if isServer then 'serverSelect' else 'select'), 
-          table: table
-          objs: output
-          isServer: isServer
-          user: auth.getUser()
-        , ->
-          total = output.length
-          if args.page or args.pageSize
-            args.page = args.page or 1
-            args.pageSize = args.pageSize or 10
-            output = output.splice (args.page - 1) * args.pageSize, args.pageSize
-          cb? output, total
-      output = exec "SELECT * FROM #{table}#{where.sql}#{sorting}", where.props, null, isServer,  myCb
+    ((user) ->
+      asyncCallback (if isServer then 'serverPreSelect' else 'preSelect'), 
+        table: table
+        args: args
+        user: user
+      , (result) ->
+        if not result
+          return cb? [], 0
+        args = args or {}
+        where = makeWhere if args.where then args.where else args
+        sorting = ''
+        if args.sort
+          args.sort = args.sort.replace /\./g, '->'
+          sorting += " ORDER BY #{args.sort}"
+          if args.sortDir
+            sorting += " #{args.sortDir}"
+        if where.sql
+          where.sql = " WHERE #{where.sql}"
+        myCb = (output) ->
+          asyncCallback (if isServer then 'serverSelect' else 'select'), 
+            table: table
+            objs: output
+            isServer: isServer
+            user: user
+          , ->
+            total = output.length
+            if args.page or args.pageSize
+              args.page = args.page or 1
+              args.pageSize = args.pageSize or 10
+              output = output.splice (args.page - 1) * args.pageSize, args.pageSize
+            asyncCallback (if isServer then 'serverSelectTransform' else 'selectTransform'),
+              table: table
+              objs: output
+              isServer: isServer
+              user: user
+            , ->
+              cb? output, total
+        output = exec "SELECT * FROM #{table}#{where.sql}#{sorting}", where.props, null, isServer,  myCb
+    )(auth.getUser())
   cleanObj = (obj) ->
     for key of obj
-      if key.indexOf('$') is 0
+      if key.indexOf('$') is 0 or key is '#'
         delete obj[key]
     return
   update = (table, obj, whereObj, cb, isServer) ->
+    console.log 'update'
     cleanObj obj
-    asyncCallback (if isServer then 'serverPreUpdate' else 'preUpdate'),
-      id: getId obj
-      table: table
-      obj: obj
-      where: whereObj
-      user: auth.getUser()
-    , (result) ->
-      if not result
-        return cb? []
-      updateSql = []
-      updateProps = []
-      where = makeWhere whereObj
-      if where.sql
-        where.sql = " WHERE #{where.sql}"
-      for key of obj
-        if where.props.indexOf(obj[key]) is -1
-          updateSql.push " `#{key}`=? "
-          updateProps.push obj[key]
-      props = updateProps.concat where.props
-      exec "UPDATE #{table} SET #{updateSql.join(',')}#{where.sql}", props, null, isServer, cb
+    obj.modifiedAt = obj.modifiedAt or 0
+    where = makeWhere whereObj
+    if where.sql
+      where.sql = " WHERE #{where.sql}"
+    ((user) ->
+      exec "SELECT * FROM #{table}#{where.sql}", where.props, null, true, (oldItems) ->
+        if oldItems
+          async.each oldItems, (oldItem, diffCb) ->
+            diffs = readDiffs oldItem, obj
+            id = getId oldItem
+            asyncCallback (if isServer then 'serverPreUpdate' else 'preUpdate'),
+              id: id
+              table: table
+              obj: obj
+              where: whereObj
+              changes: diffs
+              user: user
+            , (result) ->
+              if not result
+                return cb? []
+              updateSql = []
+              updateProps = []
+              for key of obj
+                if where.props.indexOf(obj[key]) is -1
+                  updateSql.push " `#{key}`=? "
+                  updateProps.push obj[key]
+              updateProps.push id
+              exec "UPDATE #{table} SET #{updateSql.join(',')} WHERE `#{[settings.autoId]}`= ?", updateProps, null, isServer, diffCb, diffs
+          , ->
+            cb? []
+        else
+          cb? []
+    )(auth.getUser())
   insert = (table, obj, cb, isServer) ->
+    console.log 'insert'
     cleanObj obj
-    asyncCallback (if isServer then 'serverPreInsert' else 'preInsert'),
-      table: table
-      obj: obj
-      user: auth.getUser()
-    , (result) ->
-      if not result
-        return cb? []
-      if Object.prototype.toString.call(obj) is '[object Array]'
-        exec "INSERT INTO #{table} SELECT * FROM ?", [obj], null, isServer, cb
-      else
-        exec "INSERT INTO #{table} VALUES ?", [obj], null, isServer, cb
+    obj.modifiedAt = obj.modifiedAt or 0
+    ((user) ->
+      asyncCallback (if isServer then 'serverPreInsert' else 'preInsert'),
+        table: table
+        obj: obj
+        user: user
+      , (result) ->
+        if not result
+          return cb? []
+        if Object.prototype.toString.call(obj) is '[object Array]'
+          exec "INSERT INTO #{table} SELECT * FROM ?", [obj], null, isServer, cb
+        else
+          exec "INSERT INTO #{table} VALUES ?", [obj], null, isServer, cb
+    )(auth.getUser())
   upsert = (table, obj, whereObj, cb, isServer) ->
     where = makeWhere whereObj
+    if not whereObj and obj[settings.autoId]
+      whereObj = {}
+      whereObj[settings.autoId] = obj[settings.autoId]
+      where = makeWhere whereObj
     if where.sql
       where.sql = " WHERE #{where.sql}"
     test = exec "SELECT * FROM #{table}#{where.sql}", where.props, null, isServer
@@ -421,23 +412,25 @@ module.provider 'ndxdb', ->
     where = makeWhere whereObj
     if where.sql
       where.sql = " WHERE #{where.sql}"
-    asyncCallback (if isServer then 'serverPreDelete' else 'preDelete'),
-      table: table
-      where: whereObj
-      user: auth.getUser()
-    , (result) ->
-      if not result
-        cb? []
-      exec "DELETE FROM #{table}#{where.sql}", where.props, null, isServer, cb
+    ((user) ->
+      asyncCallback (if isServer then 'serverPreDelete' else 'preDelete'),
+        table: table
+        where: whereObj
+        user: user
+      , (result) ->
+        if not result
+          cb? []
+        exec "DELETE FROM #{table}#{where.sql}", where.props, null, isServer, cb
+    )(auth.getUser())  
     
   config: (args) ->
     Object.assign settings, args
-  $get: ($http, $injector) ->
-    http = $http
+  $get: ($injector, $rootElement) ->
+    settings.database = $rootElement.attr('ng-app')
     if $injector.has 'Auth'
       auth = $injector.get 'Auth'
     start: ->
-      if settings.database and settings.tables
+      if settings.database
         attachDatabase()
     exec: exec
     select: select 
@@ -445,6 +438,9 @@ module.provider 'ndxdb', ->
     insert: insert
     upsert: upsert
     delete: del
+    makeTable: makeTable
+    maxModified: maxModified
+    getDocsToUpload: getDocsToUpload
     on: (name, callback) ->
       callbacks[name].push callback
       @
