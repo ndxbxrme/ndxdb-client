@@ -33,9 +33,9 @@ module.provider 'ndxdb', ->
     selectTransform: []
     restore: []
   generateId = (num) ->
-    output = ''
-    chars = 'abcdefghijklmnopqrstuvwxyz1234567890'
-    i = 0
+    chars = 'abcdef1234567890'
+    output = new Date().valueOf().toString(16)
+    i = output.length
     while i++ < num
       output += chars[Math.floor(Math.random() * chars.length)]
     output
@@ -260,7 +260,6 @@ module.provider 'ndxdb', ->
         if key is '$or'
           orsql = ''
           for thing in obj[key]
-            console.log thing
             objsql = parse(thing, 'AND', comp).replace /^ AND /, ''
             if / AND | OR /.test(objsql) and objsql.indexOf('(') isnt 0
               objsql = "(#{objsql})"
@@ -307,7 +306,6 @@ module.provider 'ndxdb', ->
         else
           writeVal key, comp
       parent = ''
-      console.log sql
       sql
     delete whereObj['#']
     sql = parse(whereObj, 'AND', '=').replace(/(^|\() (AND|OR) /g, '$1')

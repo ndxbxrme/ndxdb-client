@@ -50,9 +50,9 @@
     };
     generateId = function(num) {
       var chars, i, output;
-      output = '';
-      chars = 'abcdefghijklmnopqrstuvwxyz1234567890';
-      i = 0;
+      chars = 'abcdef1234567890';
+      output = new Date().valueOf().toString(16);
+      i = output.length;
       while (i++ < num) {
         output += chars[Math.floor(Math.random() * chars.length)];
       }
@@ -380,7 +380,6 @@
             ref = obj[key];
             for (j = 0, len = ref.length; j < len; j++) {
               thing = ref[j];
-              console.log(thing);
               objsql = parse(thing, 'AND', comp).replace(/^ AND /, '');
               if (/ AND | OR /.test(objsql) && objsql.indexOf('(') !== 0) {
                 objsql = "(" + objsql + ")";
@@ -434,7 +433,6 @@
           }
         }
         parent = '';
-        console.log(sql);
         return sql;
       };
       delete whereObj['#'];
