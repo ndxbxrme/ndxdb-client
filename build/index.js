@@ -117,9 +117,9 @@
     };
     attachDatabase = function() {
       var firstTime;
-      alasql("CREATE localStorage DATABASE IF NOT EXISTS " + settings.database);
-      alasql("ATTACH localStorage DATABASE " + settings.database + " AS " + settings.database);
-      alasql("USE " + settings.database);
+      alasql("CREATE localStorage DATABASE IF NOT EXISTS `" + settings.database + "`");
+      alasql("ATTACH localStorage DATABASE `" + settings.database + "` AS `" + settings.database + "`");
+      alasql("USE `" + settings.database + "`");
       database = alasql.databases["" + settings.database];
       firstTime = true;
 

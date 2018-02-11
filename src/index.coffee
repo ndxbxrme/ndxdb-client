@@ -75,10 +75,10 @@ module.provider 'ndxdb', ->
         alasql "CREATE TABLE IF NOT EXISTS #{table}"
         cb?()
   attachDatabase = ->
-    alasql "CREATE localStorage DATABASE IF NOT EXISTS #{settings.database}"
+    alasql "CREATE localStorage DATABASE IF NOT EXISTS `#{settings.database}`"
     #alasql "DROP localStorage DATABASE #{settings.database}; CREATE localStorage DATABASE #{settings.database}"
-    alasql "ATTACH localStorage DATABASE #{settings.database} AS #{settings.database}"
-    alasql "USE #{settings.database}"
+    alasql "ATTACH localStorage DATABASE `#{settings.database}` AS `#{settings.database}`"
+    alasql "USE `#{settings.database}`"
     database = alasql.databases["#{settings.database}"]
     firstTime = true
     ###
